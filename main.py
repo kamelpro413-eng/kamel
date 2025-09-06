@@ -254,4 +254,19 @@ async def logger_role(ctx, *roles: discord.Role):
         await ctx.send(f"❌ Failed to save roles: {e}")
 
 @bot.command(name='loggerchannel')
-async def logger_channel(ctx, channel_id: int
+async def logger_channel(ctx, channel_id: int):
+    global target_channel_id
+    if ctx.author.id != AUTHORIZED_USER_ID:
+        await ctx.send("❌ You don't have permission to use this command.")
+        return
+
+    try:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            target_channel_id = channel_id
+            await save_target_channel_to_db(channel_id)
+            await ctx.send(f"✅ Logger channel set to: {channel.mention}")
+        else:
+            await ctx.send("❌ Channel not found or bot doesn't have access to it.")
+    except Exception as e:
+        await ctx.send(f"❌ Failed to set logger channel: {e}")
