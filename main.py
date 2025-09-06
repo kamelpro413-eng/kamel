@@ -27,12 +27,12 @@ async def init_database():
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        # Changed to guild_settings table for per-guild data
         cur.execute('''
-            CREATE TABLE IF NOT EXISTS guild_settings (
-                guild_id BIGINT PRIMARY KEY,
-                required_role_ids TEXT,
-                target_channel_id BIGINT
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                guild_id BIGINT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                PRIMARY KEY (guild_id, key)
             )
         ''')
         conn.commit()
@@ -42,50 +42,70 @@ async def init_database():
     except Exception as e:
         print(f"Database initialization error: {e}")
 
-async def get_guild_settings(guild_id):
-    """Get required roles and target channel for a guild"""
+async def load_guild_settings(guild_id):
+    """Load settings for a guild from database"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        cur.execute("SELECT required_role_ids, target_channel_id FROM guild_settings WHERE guild_id = %s", (guild_id,))
+
+        # Load required roles
+        cur.execute("SELECT value FROM bot_settings WHERE guild_id = %s AND key = 'required_role_ids'", (guild_id,))
         result = cur.fetchone()
+        role_ids = []
+        if result:
+            role_ids = [int(rid) for rid in result[0].split(',') if rid.strip().isdigit()]
+
+        # Load target channel ID
+        cur.execute("SELECT value FROM bot_settings WHERE guild_id = %s AND key = 'target_channel_id'", (guild_id,))
+        result = cur.fetchone()
+        target_channel_id = None
+        if result:
+            try:
+                target_channel_id = int(result[0])
+            except:
+                pass
+
         cur.close()
         conn.close()
-        if result:
-            role_ids_str, channel_id = result
-            role_ids = [int(rid) for rid in role_ids_str.split(',')] if role_ids_str else []
-            return role_ids, channel_id
-        else:
-            return [], None
+        return role_ids, target_channel_id
     except Exception as e:
-        print(f"Error getting guild settings: {e}")
+        print(f"Error loading guild {guild_id} settings from database: {e}")
         return [], None
 
-async def save_guild_settings(guild_id, role_ids=None, channel_id=None):
-    """Save roles and/or channel ID for a guild"""
+async def save_required_roles_to_db(guild_id, roles):
+    """Save required roles for a guild to database"""
     try:
-        # Fetch existing settings to merge if needed
-        existing_roles, existing_channel = await get_guild_settings(guild_id)
-
-        if role_ids is None:
-            role_ids = existing_roles
-        if channel_id is None:
-            channel_id = existing_channel
-
+        role_ids_str = ','.join(str(role.id) for role in roles)
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        role_ids_str = ','.join(str(rid) for rid in role_ids) if role_ids else None
         cur.execute('''
-            INSERT INTO guild_settings (guild_id, required_role_ids, target_channel_id)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (guild_id)
-            DO UPDATE SET required_role_ids = EXCLUDED.required_role_ids, target_channel_id = EXCLUDED.target_channel_id
-        ''', (guild_id, role_ids_str, channel_id))
+            INSERT INTO bot_settings (guild_id, key, value)
+            VALUES (%s, 'required_role_ids', %s)
+            ON CONFLICT (guild_id, key)
+            DO UPDATE SET value = EXCLUDED.value
+        ''', (guild_id, role_ids_str))
         conn.commit()
         cur.close()
         conn.close()
     except Exception as e:
-        print(f"Error saving guild settings: {e}")
+        print(f"Error saving required roles for guild {guild_id} to database: {e}")
+
+async def save_target_channel_to_db(guild_id, channel_id):
+    """Save target channel ID for a guild to database"""
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute('''
+            INSERT INTO bot_settings (guild_id, key, value)
+            VALUES (%s, 'target_channel_id', %s)
+            ON CONFLICT (guild_id, key)
+            DO UPDATE SET value = EXCLUDED.value
+        ''', (guild_id, str(channel_id)))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"Error saving target channel for guild {guild_id} to database: {e}")
 
 @bot.event
 async def on_ready():
@@ -101,29 +121,32 @@ async def on_message(message):
     if message.channel.name and message.channel.name.startswith('ticket-'):
         guild_id = message.guild.id
 
-        # Initialize set for this guild if needed
         if guild_id not in claimed_tickets:
             claimed_tickets[guild_id] = set()
 
-        # Only forward if this ticket hasn't been claimed in this server
-        if message.channel.id not in claimed_tickets[guild_id]:
-            role_ids, target_channel_id = await get_guild_settings(guild_id)
-            if target_channel_id and await user_has_any_required_role(message, role_ids):
-                await forward_message_to_channel(message, target_channel_id)
-                claimed_tickets[guild_id].add(message.channel.id)  # Mark as claimed for this guild
+        # Load roles and channel for this guild dynamically
+        role_ids, target_channel_id = await load_guild_settings(guild_id)
 
+        print(f"[DEBUG] Guild {guild_id} | Ticket channel: {message.channel.name} | Target channel: {target_channel_id} | Role IDs: {role_ids}")
+
+        if message.channel.id not in claimed_tickets[guild_id]:
+            if target_channel_id and await user_has_any_required_role(message, role_ids):
+                print(f"[DEBUG] User {message.author} has required role(s), forwarding message...")
+                await forward_message_to_channel(message, target_channel_id)
+                claimed_tickets[guild_id].add(message.channel.id)
+            else:
+                print(f"[DEBUG] User {message.author} does NOT have required roles or target channel not set.")
     await bot.process_commands(message)
 
 async def user_has_any_required_role(message, role_ids):
     """Check if user has any of the required roles"""
-    try:
-        member = message.guild.get_member(message.author.id)
-        if member and role_ids:
-            return any(role.id in role_ids for role in member.roles)
+    if not role_ids:
+        print("No required roles set.")
         return False
-    except Exception as e:
-        print(f"Error checking required roles: {e}")
-        return False
+    member = message.guild.get_member(message.author.id)
+    if member:
+        return any(role.id in role_ids for role in member.roles)
+    return False
 
 async def forward_message_to_channel(message, target_channel_id):
     """Forward a message to a specific channel"""
@@ -137,10 +160,11 @@ async def forward_message_to_channel(message, target_channel_id):
                 f"Typed : {message.content}"
             )
             await target_channel.send(forwarded_message)
+            print(f"[DEBUG] Forwarded message from {message.author} in {message.channel.name} to {target_channel.name}")
         else:
-            print(f"Target channel {target_channel_id} not found")
+            print(f"[ERROR] Target channel {target_channel_id} not found")
     except Exception as e:
-        print(f"Error forwarding message: {e}")
+        print(f"[ERROR] Error forwarding message: {e}")
 
 # Flask webserver for keep_alive
 app = Flask(__name__)
@@ -194,10 +218,8 @@ async def logger_role(ctx, *roles: discord.Role):
         await ctx.send("❌ Please mention at least one role. Example: `!loggerrole @staff @support`")
         return
 
-    role_ids = [role.id for role in roles]
-
     try:
-        await save_guild_settings(ctx.guild.id, role_ids=role_ids)
+        await save_required_roles_to_db(ctx.guild.id, roles)
         mentions = ' '.join(role.mention for role in roles)
         await ctx.send(f"✅ Logger roles set to: {mentions}\nOnly users with **any** of these roles will have their ticket messages forwarded.")
     except Exception as e:
@@ -212,12 +234,21 @@ async def logger_channel(ctx, channel_id: int):
     try:
         channel = bot.get_channel(channel_id)
         if channel:
-            await save_guild_settings(ctx.guild.id, channel_id=channel_id)
+            await save_target_channel_to_db(ctx.guild.id, channel_id)
             await ctx.send(f"✅ Logger channel set to: {channel.mention} ({channel.name})\nTicket messages will be forwarded to this channel.")
         else:
             await ctx.send("❌ Channel not found or bot doesn't have access to it. Please check the channel ID.")
     except Exception as e:
         await ctx.send(f"❌ Invalid channel ID format. Please provide a valid Discord channel ID (numbers only).")
+
+@bot.command(name='checksettings')
+async def check_settings(ctx):
+    role_ids, channel_id = await load_guild_settings(ctx.guild.id)
+    roles = [ctx.guild.get_role(rid) for rid in role_ids if ctx.guild.get_role(rid) is not None]
+    roles_str = ', '.join([r.name for r in roles]) if roles else 'None'
+    channel = bot.get_channel(channel_id)
+    channel_str = channel.name if channel else 'None'
+    await ctx.send(f"Logger Roles: {roles_str}\nLogger Channel: {channel_str}")
 
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_TOKEN')
