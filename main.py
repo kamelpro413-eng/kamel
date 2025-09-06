@@ -4,7 +4,6 @@ from discord.ext import commands
 import os
 from flask import Flask
 from threading import Thread
-import psycopg2
 
 # Bot setup - Enable required intents
 intents = discord.Intents.default()
@@ -47,6 +46,7 @@ async def init_database():
     except Exception as e:
         print(f"Database initialization error: {e}")
 
+# ✅ UPDATED FUNCTION
 async def load_data_from_db():
     """Load settings from database"""
     global required_role, target_channel_id
@@ -54,17 +54,21 @@ async def load_data_from_db():
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
 
+        # Load required roles
         cur.execute("SELECT value FROM bot_settings WHERE key = 'required_role_id'")
         result = cur.fetchone()
         if result:
-            role_id = int(result[0])
+            role_ids = [int(rid) for rid in result[0].split(',')]
             for guild in bot.guilds:
-                role = guild.get_role(role_id)
-                if role:
-                    required_role = role
-                    print(f"Loaded required role: {role.name} (ID: {role.id})")
+                roles = [guild.get_role(rid) for rid in role_ids if guild.get_role(rid)]
+                if roles:
+                    required_role = roles[0]  # Compatibility fallback
+                    print("Loaded required roles:")
+                    for role in roles:
+                        print(f"- {role.name} (ID: {role.id})")
                     break
 
+        # Load target channel ID
         cur.execute("SELECT value FROM bot_settings WHERE key = 'target_channel_id'")
         result = cur.fetchone()
         if result:
@@ -137,15 +141,27 @@ async def on_message(message):
     await bot.process_commands(message)
 
 async def user_has_required_role(message):
-    """Check if user has the required role"""
-    if not required_role:
-        print("No required role set. Use !loggerrole to set one.")
-        return False
+    """Check if user has any of the required roles"""
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM bot_settings WHERE key = 'required_role_id'")
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
 
-    member = message.guild.get_member(message.author.id)
-    if member:
-        return required_role in member.roles
-    return False
+        if not result:
+            print("No required roles set. Use !loggerrole to set them.")
+            return False
+
+        role_ids = [int(rid) for rid in result[0].split(',')]
+        member = message.guild.get_member(message.author.id)
+        if member:
+            return any(role.id in role_ids for role in member.roles)
+        return False
+    except Exception as e:
+        print(f"Error checking required roles: {e}")
+        return False
 
 async def forward_message_to_channel(message, target_channel_id):
     """Forward a message to a specific channel"""
@@ -206,52 +222,36 @@ async def send_to_channel(ctx, channel_id: int, *, message):
         await ctx.send(f"Error sending message: {e}")
 
 @bot.command(name='loggerrole')
-async def logger_role(ctx, *, role_mention):
+async def logger_role(ctx, *roles: discord.Role):
     global required_role
     if ctx.author.id != AUTHORIZED_USER_ID:
         await ctx.send("❌ You don't have permission to use this command.")
         return
 
-    role = None
-    if ctx.message.role_mentions:
-        role = ctx.message.role_mentions[0]
-    else:
-        role = discord.utils.get(ctx.guild.roles, name=role_mention)
-
-    if role:
-        required_role = role
-        await save_required_role_to_db(role)
-        await ctx.send(f"✅ Logger role set to: {role.mention} ({role.name})\nOnly users with this role will have their ticket messages forwarded.")
-    else:
-        await ctx.send("❌ Role not found. Please mention the role like @new role or type the exact role name.")
-
-@bot.command(name='loggerchannel')
-async def logger_channel(ctx, channel_id: int):
-    global target_channel_id
-    if ctx.author.id != AUTHORIZED_USER_ID:
-        await ctx.send("❌ You don't have permission to use this command.")
+    if not roles:
+        await ctx.send("❌ Please mention at least one role. Example: `!loggerrole @staff @support`")
         return
 
-    try:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            target_channel_id = channel_id
-            await save_target_channel_to_db(channel_id)
-            await ctx.send(f"✅ Logger channel set to: {channel.mention} ({channel.name})\nTicket messages will be forwarded to this channel.")
-        else:
-            await ctx.send("❌ Channel not found or bot doesn't have access to it. Please check the channel ID.")
-    except Exception as e:
-        await ctx.send(f"❌ Invalid channel ID format. Please provide a valid Discord channel ID (numbers only).")
-
-if __name__ == "__main__":
-    TOKEN = os.getenv('DISCORD_TOKEN')
-    if not TOKEN:
-        print("Error: DISCORD_TOKEN environment variable not found!")
-        exit(1)
-
-    keep_alive()
+    required_role = roles[0]  # for compatibility
 
     try:
-        bot.run(TOKEN)
+        role_ids = ','.join(str(role.id) for role in roles)
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute('''
+            INSERT INTO bot_settings (key, value)
+            VALUES (%s, %s)
+            ON CONFLICT (key)
+            DO UPDATE SET value = EXCLUDED.value
+        ''', ('required_role_id', role_ids))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        mentions = ' '.join(role.mention for role in roles)
+        await ctx.send(f"✅ Logger roles set to: {mentions}\nOnly users with **any** of these roles will have their ticket messages forwarded.")
     except Exception as e:
-        print(f"Error running bot: {e}")
+        await ctx.send(f"❌ Failed to save roles: {e}")
+
+@bot.command(name='loggerchannel')
+async def logger_channel(ctx, channel_id: int
