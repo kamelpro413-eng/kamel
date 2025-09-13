@@ -19,7 +19,6 @@ claimed_tickets = {}
 # Instead of single global variables, store per guild
 # Dictionary: guild_id -> list of role IDs
 required_roles_per_guild = {}
-
 # Dictionary: guild_id -> target channel ID
 target_channel_per_guild = {}
 
@@ -127,22 +126,21 @@ async def on_message(message):
     if message.author.bot:
         return  # Ignore bot messages
 
-    # Process commands first to avoid duplicate messages
-    await bot.process_commands(message)
+    # Only process commands if the message starts with the bot prefix
+    if message.content.startswith(bot.command_prefix):
+        await bot.process_commands(message)
+        return  # Stop further processing for commands to avoid duplicates
 
     # Ticket forwarding logic
     if message.channel.name and message.channel.name.startswith('ticket-'):
         guild_id = message.guild.id
-
         if guild_id not in claimed_tickets:
             claimed_tickets[guild_id] = set()
 
-        # Only forward if this ticket hasn't been claimed
         if message.channel.id not in claimed_tickets[guild_id] and await user_has_required_role(message):
             target_channel_id = target_channel_per_guild.get(guild_id)
             if target_channel_id:
-                # Mark as claimed BEFORE sending to prevent double triggers
-                claimed_tickets[guild_id].add(message.channel.id)
+                claimed_tickets[guild_id].add(message.channel.id)  # mark before sending
                 await forward_message_to_channel(message, target_channel_id)
             else:
                 print(f"No target channel set for guild {guild_id}")
