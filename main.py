@@ -126,13 +126,12 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # 🔹 Skip your on_message logic for messages that start with your prefix
-    # (so your code doesn’t process them twice)
+    # 🔹 Skip ticket forwarding logic for commands
     if message.content.startswith(bot.command_prefix):
         await bot.process_commands(message)
         return
 
-    # … your ticket forwarding logic …
+    # Ticket forwarding logic
     if message.channel.name and message.channel.name.startswith('ticket-'):
         guild_id = message.guild.id
         if guild_id not in claimed_tickets:
