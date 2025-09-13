@@ -126,12 +126,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # 🔹 Skip ticket forwarding logic for commands
-    if message.content.startswith(bot.command_prefix):
-        await bot.process_commands(message)
-        return
-
-    # Ticket forwarding logic
+    # Ticket forwarding logic ONLY for non-command messages
     if message.channel.name and message.channel.name.startswith('ticket-'):
         guild_id = message.guild.id
         if guild_id not in claimed_tickets:
@@ -145,7 +140,9 @@ async def on_message(message):
             else:
                 print(f"No target channel set for guild {guild_id}")
 
+    # Process commands once at the very end
     await bot.process_commands(message)
+
 
 async def user_has_required_role(message):
     """Check if user has any of the required roles in that guild"""
