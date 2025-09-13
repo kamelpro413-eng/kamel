@@ -1,10 +1,10 @@
 import psycopg2
 import discord
 from discord.ext import commands
+from discord import app_commands
 import os
 from flask import Flask
 from threading import Thread
-from discord import app_commands  # for slash commands
 
 # Bot setup - Enable required intents
 intents = discord.Intents.default()
@@ -13,6 +13,9 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+# Slash commands tree
+tree = bot.tree
 
 # Tracks claimed tickets per server (guild)
 claimed_tickets = {}
@@ -122,12 +125,12 @@ async def on_ready():
     print(f'Bot is in {len(bot.guilds)} guilds')
     await init_database()
     await load_data_from_db()
-    # sync slash commands globally
+    # Sync slash commands
     try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash command(s)")
+        await tree.sync()
+        print("Slash commands synced.")
     except Exception as e:
-        print(f"Error syncing slash commands: {e}")
+        print(f"Failed to sync slash commands: {e}")
 
 @bot.event
 async def on_message(message):
@@ -207,13 +210,14 @@ def keep_alive():
     flask_thread.start()
     print("Flask server started on port 5000")
 
-# Commands
+# Regular ping command stays as is
 @bot.command(name='ping')
 async def ping_command(ctx):
     await ctx.send(f'Pong! Latency: {round(bot.latency * 1000)}ms')
 
-# ---------- SLASH COMMANDS ----------
-@bot.tree.command(name="loggerrole", description="Set required roles for ticket logging")
+# SLASH COMMANDS
+
+@tree.command(name="loggerrole", description="Set the logger roles for ticket logging.")
 @app_commands.describe(roles="Mention one or more roles")
 async def logger_role(interaction: discord.Interaction, roles: str):
     guild_id = interaction.guild.id
@@ -221,11 +225,13 @@ async def logger_role(interaction: discord.Interaction, roles: str):
         await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
         return
 
-    # roles parameter will be a string of mentions; parse IDs from it
+    # Parse role mentions into IDs
     role_ids = []
+    mentions_text = []
     for role in interaction.guild.roles:
-        if role.mention in roles:
+        if role.mention in roles or str(role.id) in roles:
             role_ids.append(role.id)
+            mentions_text.append(role.mention)
 
     if not role_ids:
         await interaction.response.send_message("❌ Please mention at least one role. Example: `/loggerrole @staff @support`", ephemeral=True)
@@ -235,26 +241,29 @@ async def logger_role(interaction: discord.Interaction, roles: str):
 
     try:
         await save_required_roles_to_db(guild_id, role_ids)
-        mentions = ' '.join(f"<@&{rid}>" for rid in role_ids)
+        mentions = ' '.join(mentions_text)
         await interaction.response.send_message(f"✅ Logger roles set to: {mentions}\nOnly users with **any** of these roles will have their ticket messages forwarded.")
     except Exception as e:
         await interaction.response.send_message(f"❌ Failed to save roles: {e}", ephemeral=True)
 
-@bot.tree.command(name="loggerchannel", description="Set target channel for ticket logging")
-@app_commands.describe(channel="Select the channel")
-async def logger_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+@tree.command(name="loggerchannel", description="Set the logger channel for ticket logging.")
+@app_commands.describe(channel_id="The ID of the channel to log tickets to")
+async def logger_channel(interaction: discord.Interaction, channel_id: int):
     guild_id = interaction.guild.id
     if interaction.user.id != AUTHORIZED_USER_ID:
         await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
         return
 
     try:
-        target_channel_per_guild[guild_id] = channel.id
-        await save_target_channel_to_db(guild_id, channel.id)
-        await interaction.response.send_message(f"✅ Logger channel set to: {channel.mention} ({channel.name})\nTicket messages will be forwarded to this channel.")
+        channel = bot.get_channel(channel_id)
+        if channel and channel.guild.id == guild_id:
+            target_channel_per_guild[guild_id] = channel_id
+            await save_target_channel_to_db(guild_id, channel_id)
+            await interaction.response.send_message(f"✅ Logger channel set to: {channel.mention} ({channel.name})\nTicket messages will be forwarded to this channel.")
+        else:
+            await interaction.response.send_message("❌ Channel not found in this server or bot doesn't have access to it. Please check the channel ID.", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"❌ Invalid channel ID format or error: {e}", ephemeral=True)
-# -----------------------------------
 
 # Optional: command error handler for user feedback on wrong commands
 @bot.event
