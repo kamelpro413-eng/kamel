@@ -19,6 +19,7 @@ claimed_tickets = {}
 # Instead of single global variables, store per guild
 # Dictionary: guild_id -> list of role IDs
 required_roles_per_guild = {}
+
 # Dictionary: guild_id -> target channel ID
 target_channel_per_guild = {}
 
@@ -126,23 +127,24 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Ticket forwarding logic ONLY for non-command messages
     if message.channel.name and message.channel.name.startswith('ticket-'):
         guild_id = message.guild.id
+
+        # Initialize set for this guild if needed
         if guild_id not in claimed_tickets:
             claimed_tickets[guild_id] = set()
 
+        # Only forward if this ticket hasn't been claimed in this server
         if message.channel.id not in claimed_tickets[guild_id] and await user_has_required_role(message):
+            # Get the target channel ID for this guild (or None)
             target_channel_id = target_channel_per_guild.get(guild_id)
             if target_channel_id:
                 await forward_message_to_channel(message, target_channel_id)
-                claimed_tickets[guild_id].add(message.channel.id)
+                claimed_tickets[guild_id].add(message.channel.id)  # Mark as claimed for this guild
             else:
                 print(f"No target channel set for guild {guild_id}")
 
-    # Process commands once at the very end
     await bot.process_commands(message)
-
 
 async def user_has_required_role(message):
     """Check if user has any of the required roles in that guild"""
@@ -159,7 +161,7 @@ async def user_has_required_role(message):
 
 async def forward_message_to_channel(message, target_channel_id):
     """Forward a message to a specific channel"""
-    try:
+    try:        
         target_channel = bot.get_channel(target_channel_id)
         if target_channel:
             forwarded_message = (
@@ -228,6 +230,7 @@ async def logger_role(ctx, *roles: discord.Role):
 
     role_ids = [role.id for role in roles]
     required_roles_per_guild[guild_id] = role_ids
+
     try:
         await save_required_roles_to_db(guild_id, role_ids)
         mentions = ' '.join(role.mention for role in roles)
