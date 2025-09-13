@@ -126,19 +126,23 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    # 🔹 Skip your on_message logic for messages that start with your prefix
+    # (so your code doesn’t process them twice)
+    if message.content.startswith(bot.command_prefix):
+        await bot.process_commands(message)
+        return
+
+    # … your ticket forwarding logic …
     if message.channel.name and message.channel.name.startswith('ticket-'):
         guild_id = message.guild.id
-        # Initialize set for this guild if needed
         if guild_id not in claimed_tickets:
             claimed_tickets[guild_id] = set()
 
-        # Only forward if this ticket hasn't been claimed in this server
         if message.channel.id not in claimed_tickets[guild_id] and await user_has_required_role(message):
-            # Get the target channel ID for this guild (or None)
             target_channel_id = target_channel_per_guild.get(guild_id)
             if target_channel_id:
                 await forward_message_to_channel(message, target_channel_id)
-                claimed_tickets[guild_id].add(message.channel.id)  # Mark as claimed for this guild
+                claimed_tickets[guild_id].add(message.channel.id)
             else:
                 print(f"No target channel set for guild {guild_id}")
 
