@@ -126,11 +126,6 @@ async def on_message(message):
     if message.author.bot:
         return  # Ignore bot messages
 
-    # Only process commands if the message starts with the bot prefix
-    if message.content.startswith(bot.command_prefix):
-        await bot.process_commands(message)
-        return  # Stop further processing for commands to avoid duplicates
-
     # Ticket forwarding logic
     if message.channel.name and message.channel.name.startswith('ticket-'):
         guild_id = message.guild.id
@@ -144,6 +139,9 @@ async def on_message(message):
                 await forward_message_to_channel(message, target_channel_id)
             else:
                 print(f"No target channel set for guild {guild_id}")
+
+    # Process commands exactly once for every message
+    await bot.process_commands(message)
 
 async def user_has_required_role(message):
     """Check if user has any of the required roles in that guild"""
