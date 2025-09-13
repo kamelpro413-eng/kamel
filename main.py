@@ -125,26 +125,27 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     if message.author.bot:
-        return
+        return  # Ignore bot messages
 
+    # Process commands first to avoid duplicate messages
+    await bot.process_commands(message)
+
+    # Ticket forwarding logic
     if message.channel.name and message.channel.name.startswith('ticket-'):
         guild_id = message.guild.id
 
-        # Initialize set for this guild if needed
         if guild_id not in claimed_tickets:
             claimed_tickets[guild_id] = set()
 
-        # Only forward if this ticket hasn't been claimed in this server
+        # Only forward if this ticket hasn't been claimed
         if message.channel.id not in claimed_tickets[guild_id] and await user_has_required_role(message):
-            # Get the target channel ID for this guild (or None)
             target_channel_id = target_channel_per_guild.get(guild_id)
             if target_channel_id:
+                # Mark as claimed BEFORE sending to prevent double triggers
+                claimed_tickets[guild_id].add(message.channel.id)
                 await forward_message_to_channel(message, target_channel_id)
-                claimed_tickets[guild_id].add(message.channel.id)  # Mark as claimed for this guild
             else:
                 print(f"No target channel set for guild {guild_id}")
-
-    await bot.process_commands(message)
 
 async def user_has_required_role(message):
     """Check if user has any of the required roles in that guild"""
@@ -161,7 +162,7 @@ async def user_has_required_role(message):
 
 async def forward_message_to_channel(message, target_channel_id):
     """Forward a message to a specific channel"""
-    try:        
+    try:
         target_channel = bot.get_channel(target_channel_id)
         if target_channel:
             forwarded_message = (
