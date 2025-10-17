@@ -259,25 +259,10 @@ async def logger_channel(ctx, channel_id: int):
     except Exception as e:
         await ctx.send(f"❌ Invalid channel ID format or error: {e}")
 
-# Slash commands for loggerrole and loggerchannel
-@tree.command(name="loggerrole", description="Set a role that can forward tickets")
-@app_commands.describe(role="Select a role allowed to forward tickets")
-async def slash_loggerrole(interaction: discord.Interaction, role: discord.Role):
-    guild_id = interaction.guild.id
-    if interaction.user.id != AUTHORIZED_USER_ID:
-        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
-        return
-    
-    current_roles = required_roles_per_guild.get(guild_id, [])
-    if role.id not in current_roles:
-        current_roles.append(role.id)
-    required_roles_per_guild[guild_id] = current_roles
-    await save_required_roles_to_db(guild_id, current_roles)
-    await interaction.response.send_message(f"✅ Logger role added: {role.mention}", ephemeral=True)
-
+# Slash command for loggerchannel (same as before)
 @tree.command(name="loggerchannel", description="Set the logger channel for ticket messages")
 @app_commands.describe(channel="Select a text channel")
-async def slash_loggerchannel(interaction: discord.Interaction, channel: discord.TextChannel):
+async def slash_loggerchannel(interaction: discord.Interaction, channel: discord.Text_Channel):
     guild_id = interaction.guild.id
     if interaction.user.id != AUTHORIZED_USER_ID:
         await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
@@ -286,6 +271,40 @@ async def slash_loggerchannel(interaction: discord.Interaction, channel: discord
     target_channel_per_guild[guild_id] = channel.id
     await save_target_channel_to_db(guild_id, channel.id)
     await interaction.response.send_message(f"✅ Logger channel set to: {channel.mention}", ephemeral=True)
+
+# Slash command for loggerrole with multi-role selection
+@tree.command(name="loggerrole", description="Select roles that can forward tickets")
+async def slash_loggerrole(interaction: discord.Interaction):
+    guild = interaction.guild
+    if interaction.user.id != AUTHORIZED_USER_ID:
+        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+        return
+
+    # Create a select menu with all roles in the guild
+    options = [
+        discord.SelectOption(label=role.name, value=str(role.id))
+        for role in guild.roles if role != guild.default_role
+    ]
+
+    class RoleSelect(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=120)
+            self.add_item(discord.ui.Select(placeholder="Select roles", min_values=1, max_values=len(options), options=options))
+
+        @discord.ui.select()
+        async def select_callback(self, select: discord.ui.Select, interaction2: discord.Interaction):
+            selected_role_ids = [int(rid) for rid in select.values]
+            current_roles = required_roles_per_guild.get(guild.id, [])
+            for rid in selected_role_ids:
+                if rid not in current_roles:
+                    current_roles.append(rid)
+            required_roles_per_guild[guild.id] = current_roles
+            await save_required_roles_to_db(guild.id, current_roles)
+            mentions = ' '.join(f"<@&{rid}>" for rid in selected_role_ids)
+            await interaction2.response.edit_message(content=f"✅ Logger roles added: {mentions}", view=None)
+
+    view = RoleSelect()
+    await interaction.response.send_message("Select roles to allow forwarding tickets:", view=view, ephemeral=True)
 
 # Optional: command error handler for user feedback on wrong commands
 @bot.event
