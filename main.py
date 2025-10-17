@@ -262,7 +262,7 @@ async def logger_channel(ctx, channel_id: int):
 # Slash command for loggerchannel (same as before)
 @tree.command(name="loggerchannel", description="Set the logger channel for ticket messages")
 @app_commands.describe(channel="Select a text channel")
-async def slash_loggerchannel(interaction: discord.Interaction, channel: discord.Text_Channel):
+async def slash_loggerchannel(interaction: discord.Interaction, channel: discord.TextChannel):
     guild_id = interaction.guild.id
     if interaction.user.id != AUTHORIZED_USER_ID:
         await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
