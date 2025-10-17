@@ -260,19 +260,20 @@ async def logger_channel(ctx, channel_id: int):
         await ctx.send(f"❌ Invalid channel ID format or error: {e}")
 
 # Slash commands for loggerrole and loggerchannel
-@tree.command(name="loggerrole", description="Set roles that can forward tickets")
-@app_commands.describe(roles="Select roles allowed to forward tickets")
-async def slash_loggerrole(interaction: discord.Interaction, roles: list[discord.Role]):
+@tree.command(name="loggerrole", description="Set a role that can forward tickets")
+@app_commands.describe(role="Select a role allowed to forward tickets")
+async def slash_loggerrole(interaction: discord.Interaction, role: discord.Role):
     guild_id = interaction.guild.id
     if interaction.user.id != AUTHORIZED_USER_ID:
         await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
         return
     
-    role_ids = [role.id for role in roles]
-    required_roles_per_guild[guild_id] = role_ids
-    await save_required_roles_to_db(guild_id, role_ids)
-    mentions = ' '.join(role.mention for role in roles)
-    await interaction.response.send_message(f"✅ Logger roles set to: {mentions}", ephemeral=True)
+    current_roles = required_roles_per_guild.get(guild_id, [])
+    if role.id not in current_roles:
+        current_roles.append(role.id)
+    required_roles_per_guild[guild_id] = current_roles
+    await save_required_roles_to_db(guild_id, current_roles)
+    await interaction.response.send_message(f"✅ Logger role added: {role.mention}", ephemeral=True)
 
 @tree.command(name="loggerchannel", description="Set the logger channel for ticket messages")
 @app_commands.describe(channel="Select a text channel")
