@@ -13,6 +13,9 @@ intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# Command tree for slash commands
+tree = bot.tree
+
 # Tracks claimed tickets per server (guild)
 claimed_tickets = {}
 
@@ -120,6 +123,8 @@ async def on_ready():
     print(f'Bot is in {len(bot.guilds)} guilds')
     await init_database()
     await load_data_from_db()
+    await bot.tree.sync()
+    print("Slash commands synced!")
 
 @bot.event
 async def on_message(message):
@@ -252,6 +257,33 @@ async def logger_channel(ctx, channel_id: int):
             await ctx.send("❌ Channel not found in this server or bot doesn't have access to it. Please check the channel ID.")
     except Exception as e:
         await ctx.send(f"❌ Invalid channel ID format or error: {e}")
+
+# Slash commands for loggerrole and loggerchannel
+@tree.command(name="loggerrole", description="Set roles that can forward tickets")
+@app_commands.describe(roles="Select roles allowed to forward tickets")
+async def slash_loggerrole(interaction: discord.Interaction, roles: list[discord.Role]):
+    guild_id = interaction.guild.id
+    if interaction.user.id != AUTHORIZED_USER_ID:
+        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+        return
+    
+    role_ids = [role.id for role in roles]
+    required_roles_per_guild[guild_id] = role_ids
+    await save_required_roles_to_db(guild_id, role_ids)
+    mentions = ' '.join(role.mention for role in roles)
+    await interaction.response.send_message(f"✅ Logger roles set to: {mentions}", ephemeral=True)
+
+@tree.command(name="loggerchannel", description="Set the logger channel for ticket messages")
+@app_commands.describe(channel="Select a text channel")
+async def slash_loggerchannel(interaction: discord.Interaction, channel: discord.TextChannel):
+    guild_id = interaction.guild.id
+    if interaction.user.id != AUTHORIZED_USER_ID:
+        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+        return
+    
+    target_channel_per_guild[guild_id] = channel.id
+    await save_target_channel_to_db(guild_id, channel.id)
+    await interaction.response.send_message(f"✅ Logger channel set to: {channel.mention}", ephemeral=True)
 
 # Optional: command error handler for user feedback on wrong commands
 @bot.event
