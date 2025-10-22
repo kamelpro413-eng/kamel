@@ -59,7 +59,6 @@ async def load_data_from_db():
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
 
-        # Fetch all required roles for all guilds
         cur.execute("SELECT guild_id, value FROM bot_settings WHERE key = 'required_role_ids'")
         rows = cur.fetchall()
         for guild_id, value in rows:
@@ -67,7 +66,6 @@ async def load_data_from_db():
             required_roles_per_guild[guild_id] = role_ids
             print(f"Loaded required roles for guild {guild_id}: {role_ids}")
 
-        # Fetch all target channels for all guilds
         cur.execute("SELECT guild_id, value FROM bot_settings WHERE key = 'target_channel_id'")
         rows = cur.fetchall()
         for guild_id, value in rows:
@@ -84,7 +82,6 @@ async def load_data_from_db():
         print(f"Error loading data from database: {e}")
 
 async def save_required_roles_to_db(guild_id, role_ids):
-    """Save required role IDs for a guild to database"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
@@ -102,7 +99,6 @@ async def save_required_roles_to_db(guild_id, role_ids):
         print(f"Error saving required roles to database: {e}")
 
 async def save_target_channel_to_db(guild_id, channel_id):
-    """Save target channel ID for a guild to database"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
@@ -130,9 +126,8 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     if message.author.bot:
-        return  # Ignore bot messages
+        return
 
-    # Ticket forwarding logic
     if message.channel.name and message.channel.name.startswith('ticket-'):
         guild_id = message.guild.id
         if guild_id not in claimed_tickets:
@@ -141,29 +136,25 @@ async def on_message(message):
         if message.channel.id not in claimed_tickets[guild_id] and await user_has_required_role(message):
             target_channel_id = target_channel_per_guild.get(guild_id)
             if target_channel_id:
-                claimed_tickets[guild_id].add(message.channel.id)  # mark before sending
+                claimed_tickets[guild_id].add(message.channel.id)
                 await forward_message_to_channel(message, target_channel_id)
             else:
                 print(f"No target channel set for guild {guild_id}")
 
-    # Process commands exactly once for every message
     await bot.process_commands(message)
 
 async def user_has_required_role(message):
-    """Check if user has any of the required roles in that guild"""
     guild_id = message.guild.id
     required_role_ids = required_roles_per_guild.get(guild_id, [])
     if not required_role_ids:
         print(f"No required roles set for guild {guild_id}. Use !loggerrole to set them.")
         return False
-
     member = message.guild.get_member(message.author.id)
     if member:
         return any(role.id in required_role_ids for role in member.roles)
     return False
 
 async def forward_message_to_channel(message, target_channel_id):
-    """Forward a message to a specific channel"""
     try:
         target_channel = bot.get_channel(target_channel_id)
         if target_channel:
@@ -179,7 +170,6 @@ async def forward_message_to_channel(message, target_channel_id):
     except Exception as e:
         print(f"Error forwarding message: {e}")
 
-# Flask webserver for keep_alive
 app = Flask(__name__)
 
 @app.route('/')
@@ -259,7 +249,6 @@ async def logger_channel(ctx, channel_id: int):
     except Exception as e:
         await ctx.send(f"❌ Invalid channel ID format or error: {e}")
 
-# Slash command for loggerchannel (same as before)
 @tree.command(name="loggerchannel", description="Set the logger channel for ticket messages")
 @app_commands.describe(channel="Select a text channel")
 async def slash_loggerchannel(interaction: discord.Interaction, channel: discord.TextChannel):
@@ -272,7 +261,6 @@ async def slash_loggerchannel(interaction: discord.Interaction, channel: discord
     await save_target_channel_to_db(guild_id, channel.id)
     await interaction.response.send_message(f"✅ Logger channel set to: {channel.mention}", ephemeral=True)
 
-# Slash command for loggerrole with multi-role selection
 @tree.command(name="loggerrole", description="Select roles that can forward tickets")
 async def slash_loggerrole(interaction: discord.Interaction):
     guild = interaction.guild
@@ -280,7 +268,6 @@ async def slash_loggerrole(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
         return
 
-    # Create a select menu with all roles in the guild
     options = [
         discord.SelectOption(label=role.name, value=str(role.id))
         for role in guild.roles if role != guild.default_role
@@ -306,7 +293,6 @@ async def slash_loggerrole(interaction: discord.Interaction):
     view = RoleSelect()
     await interaction.response.send_message("Select roles to allow forwarding tickets:", view=view, ephemeral=True)
 
-# Optional: command error handler for user feedback on wrong commands
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
@@ -314,6 +300,15 @@ async def on_command_error(ctx, error):
     else:
         print(f"Error in command {ctx.command}: {error}")
         await ctx.send(f"❌ An error occurred: {error}")
+
+# 🆕 NEW COMMAND (your request)
+@bot.command(name='role')
+async def role_command(ctx, *roles: discord.Role):
+    if not roles:
+        await ctx.send("❌ Please mention at least one role. Example: ?role @Player @Owner")
+        return
+    mentions = ' '.join(role.mention for role in roles)
+    await ctx.send(f"✅ You mentioned these roles: {mentions}")
 
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_TOKEN')
