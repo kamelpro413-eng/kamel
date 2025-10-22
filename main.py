@@ -301,14 +301,33 @@ async def on_command_error(ctx, error):
         print(f"Error in command {ctx.command}: {error}")
         await ctx.send(f"❌ An error occurred: {error}")
 
-# 🆕 NEW COMMAND (your request)
 @bot.command(name='role')
-async def role_command(ctx, *roles: discord.Role):
-    if not roles:
-        await ctx.send("❌ Please mention at least one role. Example: ?role @Player @Owner")
+@commands.has_permissions(manage_roles=True)
+async def role_command(ctx):
+    if len(ctx.message.mentions) < 2:
+        await ctx.send("❌ Please mention a user and at least one role.\nExample: `?role @User @Staff @Member`")
         return
-    mentions = ' '.join(role.mention for role in roles)
-    await ctx.send(f"✅ You mentioned these roles: {mentions}")
+
+    user = ctx.message.mentions[0]  # First mention is the user
+    roles = ctx.message.mentions[1:]  # The rest are roles
+
+    given_roles = []
+    failed_roles = []
+
+    for role in roles:
+        if isinstance(role, discord.Role):
+            try:
+                await user.add_roles(role)
+                given_roles.append(role.name)
+            except discord.Forbidden:
+                failed_roles.append(role.name)
+
+    msg = f"✅ Added roles {', '.join(given_roles)} to {user.mention}."
+    if failed_roles:
+        msg += f"\n⚠️ Failed to add: {', '.join(failed_roles)} (missing permissions)."
+
+    await ctx.send(msg)
+
 
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_TOKEN')
