@@ -302,7 +302,6 @@ async def on_command_error(ctx, error):
         await ctx.send(f"❌ An error occurred: {error}")
 
 @bot.command(name='role')
-@commands.has_permissions(manage_roles=True)
 async def role_command(ctx):
     mentions = ctx.message.mentions
     role_mentions = ctx.message.role_mentions
