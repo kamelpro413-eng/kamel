@@ -304,27 +304,38 @@ async def on_command_error(ctx, error):
 @bot.command(name='role')
 @commands.has_permissions(manage_roles=True)
 async def role_command(ctx):
-    if len(ctx.message.mentions) < 2:
-        await ctx.send("❌ Please mention a user and at least one role.\nExample: `?role @User @Staff @Member`")
+    mentions = ctx.message.mentions
+    role_mentions = ctx.message.role_mentions
+
+    # Find user (first user mentioned)
+    user = None
+    for mention in mentions:
+        if isinstance(mention, discord.Member):
+            user = mention
+            break
+
+    # Collect all mentioned roles
+    roles = role_mentions
+
+    if not user or not roles:
+        await ctx.send("❌ Please mention a **user** and at least one **role**.\nExample: `!role @User @Staff @Member`")
         return
 
-    user = ctx.message.mentions[0]  # First mention is the user
-    roles = ctx.message.mentions[1:]  # The rest are roles
-
-    given_roles = []
-    failed_roles = []
+    added = []
+    failed = []
 
     for role in roles:
-        if isinstance(role, discord.Role):
-            try:
-                await user.add_roles(role)
-                given_roles.append(role.name)
-            except discord.Forbidden:
-                failed_roles.append(role.name)
+        try:
+            await user.add_roles(role)
+            added.append(role.name)
+        except discord.Forbidden:
+            failed.append(role.name)
+        except Exception as e:
+            failed.append(f"{role.name} ({e})")
 
-    msg = f"✅ Added roles {', '.join(given_roles)} to {user.mention}."
-    if failed_roles:
-        msg += f"\n⚠️ Failed to add: {', '.join(failed_roles)} (missing permissions)."
+    msg = f"✅ Added roles to {user.mention}: {', '.join(added)}"
+    if failed:
+        msg += f"\n⚠️ Failed to add: {', '.join(failed)} (check bot permissions or role position)."
 
     await ctx.send(msg)
 
